@@ -218,6 +218,8 @@ export class IncidentIq implements INodeType {
           { name: 'List Site Issues', value: 'getMany', action: 'List site issues (IDs only)' },
           { name: 'List Issue Types', value: 'getTypes', action: 'List issue types with names' },
           { name: 'List All Issues', value: 'listIssues', action: 'List all issues with names and categories' },
+          { name: 'List Issues by Model', value: 'listByModel', action: 'List issues available for an asset model' },
+          { name: 'List Issues by Asset', value: 'listByAsset', action: 'List issues available for a specific asset' },
           { name: 'Lookup by Name', value: 'lookupByName', action: 'Find an issue by name' },
         ],
         default: 'getMany',
@@ -487,7 +489,19 @@ export class IncidentIq implements INodeType {
       {
         displayName: 'Apply Site Visibility', name: 'applySiteVisibility', type: 'boolean', default: true,
         description: 'When true, only returns issues visible at the current site. When false, returns all issues regardless of site visibility.',
-        displayOptions: { show: { resource: ['issue'], operation: ['listIssues'] } },
+        displayOptions: { show: { resource: ['issue'], operation: ['listIssues', 'listByModel', 'listByAsset'] } },
+      },
+      {
+        displayName: 'Model ID', name: 'issueModelId', type: 'string', default: '', required: true,
+        placeholder: 'd4e5f6a7-b8c9-0123-d4e5-f6a7b8c90123',
+        description: 'UUID of the asset model to list issues for',
+        displayOptions: { show: { resource: ['issue'], operation: ['listByModel'] } },
+      },
+      {
+        displayName: 'Asset ID', name: 'issueAssetId', type: 'string', default: '', required: true,
+        placeholder: 'a1b2c3d4-e5f6-7890-a1b2-c3d4e5f67890',
+        description: 'UUID of the asset to list issues for',
+        displayOptions: { show: { resource: ['issue'], operation: ['listByAsset'] } },
       },
 
       // ─────────────────────────────────
@@ -495,12 +509,12 @@ export class IncidentIq implements INodeType {
       // ─────────────────────────────────
       {
         displayName: 'Return All', name: 'returnAll', type: 'boolean', default: false,
-        displayOptions: { show: { operation: ['getMany', 'getTypes', 'listIssues'] } },
+        displayOptions: { show: { operation: ['getMany', 'getTypes', 'listIssues', 'listByAsset'] } },
       },
       {
         displayName: 'Limit', name: 'limit', type: 'number', default: 50,
         typeOptions: { minValue: 1, maxValue: 250 },
-        displayOptions: { show: { operation: ['getMany', 'getTypes', 'listIssues'], returnAll: [false] } },
+        displayOptions: { show: { operation: ['getMany', 'getTypes', 'listIssues', 'listByAsset'], returnAll: [false] } },
       },
       {
         displayName: 'Filter (JSON)', name: 'filterJson', type: 'json', default: '{}',
@@ -786,6 +800,30 @@ export class IncidentIq implements INodeType {
             const body = {
               SiteScope: 'Aggregate',
               ApplySiteVisibility: applySiteVis,
+            };
+            responseData = await iiqPostPaginatedRequest(this, '/api/v1.0/issues', body, limit);
+          }
+
+          if (operation === 'listByModel') {
+            // GET /api/v1.0/issues/for/models/{modelId} — issues available for an asset model
+            const modelId = this.getNodeParameter('issueModelId', i) as string;
+            const applySiteVis = this.getNodeParameter('applySiteVisibility', i, true) as boolean;
+            const qs = `?ApplySiteVisibility=${applySiteVis}`;
+            const response = await iiqApiRequest(this, 'GET', `/api/v1.0/issues/for/models/${modelId}${qs}`);
+            responseData = response?.Items ?? response ?? [];
+          }
+
+          if (operation === 'listByAsset') {
+            // POST /api/v1.0/issues with AssetIds filter — issues available for a specific asset
+            const assetId = this.getNodeParameter('issueAssetId', i) as string;
+            const returnAll = this.getNodeParameter('returnAll', i) as boolean;
+            const limit = returnAll ? undefined : (this.getNodeParameter('limit', i) as number);
+            const applySiteVis = this.getNodeParameter('applySiteVisibility', i, true) as boolean;
+            const body = {
+              SiteScope: 'Aggregate',
+              Strategy: 'Explicit',
+              ApplySiteVisibility: applySiteVis,
+              AssetIds: [assetId],
             };
             responseData = await iiqPostPaginatedRequest(this, '/api/v1.0/issues', body, limit);
           }
