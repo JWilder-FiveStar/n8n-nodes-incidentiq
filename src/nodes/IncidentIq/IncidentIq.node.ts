@@ -147,6 +147,7 @@ export class IncidentIq implements INodeType {
           { name: 'Ticket', value: 'ticket' },
           { name: 'User', value: 'user' },
           { name: 'Asset', value: 'asset' },
+          { name: 'Model', value: 'model' },
           { name: 'Issue', value: 'issue' },
           { name: 'Team', value: 'team' },
           { name: 'Category', value: 'category' },
@@ -205,6 +206,17 @@ export class IncidentIq implements INodeType {
           { name: 'Search by Serial', value: 'searchBySerial', action: 'Find asset by serial number' },
           { name: 'Checkout', value: 'checkout', action: 'Check out asset to user' },
           { name: 'Checkin', value: 'checkin', action: 'Check in an asset' },
+        ],
+        default: 'getMany',
+      },
+
+      // Model
+      {
+        displayName: 'Operation', name: 'operation', type: 'options', noDataExpression: true,
+        displayOptions: { show: { resource: ['model'] } },
+        options: [
+          { name: 'Get', value: 'get', action: 'Get a model by ID' },
+          { name: 'Get Many', value: 'getMany', action: 'List asset models' },
         ],
         default: 'getMany',
       },
@@ -302,6 +314,26 @@ export class IncidentIq implements INodeType {
       {
         displayName: 'Issue ID', name: 'issueId', type: 'string', default: '', required: true,
         displayOptions: { show: { resource: ['issue'], operation: ['get'] } },
+      },
+      {
+        displayName: 'Model ID', name: 'modelLookupId', type: 'string', default: '', required: true,
+        placeholder: 'd4e5f6a7-b8c9-0123-d4e5-f6a7b8c90123',
+        displayOptions: { show: { resource: ['model'], operation: ['get'] } },
+      },
+      {
+        displayName: 'Order By', name: 'modelOrderBy', type: 'string', default: '',
+        placeholder: 'Name',
+        description: 'Field name to sort by (e.g. Name, ModelId)',
+        displayOptions: { show: { resource: ['model'], operation: ['getMany'] } },
+      },
+      {
+        displayName: 'Order Direction', name: 'modelOrderDirection', type: 'options',
+        options: [
+          { name: 'Ascending', value: 'asc' },
+          { name: 'Descending', value: 'desc' },
+        ],
+        default: 'asc',
+        displayOptions: { show: { resource: ['model'], operation: ['getMany'] } },
       },
       {
         displayName: 'Team ID', name: 'teamId', type: 'string', default: '', required: true,
@@ -515,6 +547,15 @@ export class IncidentIq implements INodeType {
         displayName: 'Limit', name: 'limit', type: 'number', default: 50,
         typeOptions: { minValue: 1, maxValue: 250 },
         displayOptions: { show: { operation: ['getMany', 'getTypes', 'listIssues', 'listByAsset'], returnAll: [false] } },
+      },
+      {
+        displayName: 'Return All', name: 'modelReturnAll', type: 'boolean', default: false,
+        displayOptions: { show: { resource: ['model'], operation: ['getMany'] } },
+      },
+      {
+        displayName: 'Limit', name: 'modelLimit', type: 'number', default: 50,
+        typeOptions: { minValue: 1, maxValue: 250 },
+        displayOptions: { show: { resource: ['model'], operation: ['getMany'], modelReturnAll: [false] } },
       },
       {
         displayName: 'Filter (JSON)', name: 'filterJson', type: 'json', default: '{}',
@@ -764,6 +805,45 @@ export class IncidentIq implements INodeType {
 
           if (operation === 'checkin') {
             responseData = await iiqApiRequest(this, 'POST', `/api/v1.0/assets/${this.getNodeParameter('assetId', i)}/checkin`, {});
+          }
+        }
+
+        // ═════════════════════════════
+        //  MODELS
+        //  GET /api/v1.0/models (paginated with $top/$skip)
+        //  GET /api/v1.0/models/{ModelId}
+        // ═════════════════════════════
+        if (resource === 'model') {
+
+          if (operation === 'get') {
+            const modelId = this.getNodeParameter('modelLookupId', i) as string;
+            responseData = await iiqApiRequest(this, 'GET', `/api/v1.0/models/${modelId}`);
+          }
+
+          if (operation === 'getMany') {
+            const returnAll = this.getNodeParameter('modelReturnAll', i) as boolean;
+            const limit = returnAll ? undefined : (this.getNodeParameter('modelLimit', i) as number);
+            const orderBy = this.getNodeParameter('modelOrderBy', i, '') as string;
+            const orderDir = this.getNodeParameter('modelOrderDirection', i, 'asc') as string;
+            // Uses OData-style $top/$skip pagination (not $p/$s)
+            const pageSize = limit ? Math.min(100, limit) : 100;
+            const results: any[] = [];
+            let skip = 0;
+            let hasMore = true;
+            while (hasMore) {
+              const take = limit ? Math.min(pageSize, limit - results.length) : pageSize;
+              const qs = new URLSearchParams({ $top: String(take), $skip: String(skip) });
+              if (orderBy) qs.set('$orderby', orderBy);
+              if (orderBy && orderDir) qs.set('$orderbyDirection', orderDir);
+              const response = await iiqApiRequest(this, 'GET', `/api/v1.0/models?${qs.toString()}`);
+              const items = response?.Items ?? response ?? [];
+              if (!Array.isArray(items) || items.length === 0) break;
+              results.push(...items);
+              if (items.length < take) hasMore = false;
+              if (limit && results.length >= limit) { responseData = results.slice(0, limit); break; }
+              skip += items.length;
+            }
+            if (!responseData) responseData = results;
           }
         }
 
