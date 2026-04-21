@@ -147,6 +147,7 @@ export class IncidentIq implements INodeType {
           { name: 'Ticket', value: 'ticket' },
           { name: 'User', value: 'user' },
           { name: 'Asset', value: 'asset' },
+          { name: 'Model', value: 'model' },
           { name: 'Issue', value: 'issue' },
           { name: 'Team', value: 'team' },
           { name: 'Category', value: 'category' },
@@ -209,6 +210,17 @@ export class IncidentIq implements INodeType {
         default: 'getMany',
       },
 
+      // Model
+      {
+        displayName: 'Operation', name: 'operation', type: 'options', noDataExpression: true,
+        displayOptions: { show: { resource: ['model'] } },
+        options: [
+          { name: 'Get', value: 'get', action: 'Get a model by ID' },
+          { name: 'Get Many', value: 'getMany', action: 'List asset models' },
+        ],
+        default: 'getMany',
+      },
+
       // Issue
       {
         displayName: 'Operation', name: 'operation', type: 'options', noDataExpression: true,
@@ -218,6 +230,8 @@ export class IncidentIq implements INodeType {
           { name: 'List Site Issues', value: 'getMany', action: 'List site issues (IDs only)' },
           { name: 'List Issue Types', value: 'getTypes', action: 'List issue types with names' },
           { name: 'List All Issues', value: 'listIssues', action: 'List all issues with names and categories' },
+          { name: 'List Issues by Model', value: 'listByModel', action: 'List issues available for an asset model' },
+          { name: 'List Issues by Asset', value: 'listByAsset', action: 'List issues available for a specific asset' },
           { name: 'Lookup by Name', value: 'lookupByName', action: 'Find an issue by name' },
         ],
         default: 'getMany',
@@ -300,6 +314,26 @@ export class IncidentIq implements INodeType {
       {
         displayName: 'Issue ID', name: 'issueId', type: 'string', default: '', required: true,
         displayOptions: { show: { resource: ['issue'], operation: ['get'] } },
+      },
+      {
+        displayName: 'Model ID', name: 'modelLookupId', type: 'string', default: '', required: true,
+        placeholder: 'd4e5f6a7-b8c9-0123-d4e5-f6a7b8c90123',
+        displayOptions: { show: { resource: ['model'], operation: ['get'] } },
+      },
+      {
+        displayName: 'Order By', name: 'modelOrderBy', type: 'string', default: '',
+        placeholder: 'Name',
+        description: 'Field name to sort by (e.g. Name, ModelId)',
+        displayOptions: { show: { resource: ['model'], operation: ['getMany'] } },
+      },
+      {
+        displayName: 'Order Direction', name: 'modelOrderDirection', type: 'options',
+        options: [
+          { name: 'Ascending', value: 'asc' },
+          { name: 'Descending', value: 'desc' },
+        ],
+        default: 'asc',
+        displayOptions: { show: { resource: ['model'], operation: ['getMany'] } },
       },
       {
         displayName: 'Team ID', name: 'teamId', type: 'string', default: '', required: true,
@@ -487,7 +521,19 @@ export class IncidentIq implements INodeType {
       {
         displayName: 'Apply Site Visibility', name: 'applySiteVisibility', type: 'boolean', default: true,
         description: 'When true, only returns issues visible at the current site. When false, returns all issues regardless of site visibility.',
-        displayOptions: { show: { resource: ['issue'], operation: ['listIssues'] } },
+        displayOptions: { show: { resource: ['issue'], operation: ['listIssues', 'listByModel', 'listByAsset'] } },
+      },
+      {
+        displayName: 'Model ID', name: 'issueModelId', type: 'string', default: '', required: true,
+        placeholder: 'd4e5f6a7-b8c9-0123-d4e5-f6a7b8c90123',
+        description: 'UUID of the asset model to list issues for',
+        displayOptions: { show: { resource: ['issue'], operation: ['listByModel'] } },
+      },
+      {
+        displayName: 'Asset ID', name: 'issueAssetId', type: 'string', default: '', required: true,
+        placeholder: 'a1b2c3d4-e5f6-7890-a1b2-c3d4e5f67890',
+        description: 'UUID of the asset to list issues for',
+        displayOptions: { show: { resource: ['issue'], operation: ['listByAsset'] } },
       },
 
       // ─────────────────────────────────
@@ -495,12 +541,21 @@ export class IncidentIq implements INodeType {
       // ─────────────────────────────────
       {
         displayName: 'Return All', name: 'returnAll', type: 'boolean', default: false,
-        displayOptions: { show: { operation: ['getMany', 'getTypes', 'listIssues'] } },
+        displayOptions: { show: { operation: ['getMany', 'getTypes', 'listIssues', 'listByAsset'] } },
       },
       {
         displayName: 'Limit', name: 'limit', type: 'number', default: 50,
         typeOptions: { minValue: 1, maxValue: 250 },
-        displayOptions: { show: { operation: ['getMany', 'getTypes', 'listIssues'], returnAll: [false] } },
+        displayOptions: { show: { operation: ['getMany', 'getTypes', 'listIssues', 'listByAsset'], returnAll: [false] } },
+      },
+      {
+        displayName: 'Return All', name: 'modelReturnAll', type: 'boolean', default: false,
+        displayOptions: { show: { resource: ['model'], operation: ['getMany'] } },
+      },
+      {
+        displayName: 'Limit', name: 'modelLimit', type: 'number', default: 50,
+        typeOptions: { minValue: 1, maxValue: 250 },
+        displayOptions: { show: { resource: ['model'], operation: ['getMany'], modelReturnAll: [false] } },
       },
       {
         displayName: 'Filter (JSON)', name: 'filterJson', type: 'json', default: '{}',
@@ -754,6 +809,45 @@ export class IncidentIq implements INodeType {
         }
 
         // ═════════════════════════════
+        //  MODELS
+        //  GET /api/v1.0/models (paginated with $top/$skip)
+        //  GET /api/v1.0/models/{ModelId}
+        // ═════════════════════════════
+        if (resource === 'model') {
+
+          if (operation === 'get') {
+            const modelId = this.getNodeParameter('modelLookupId', i) as string;
+            responseData = await iiqApiRequest(this, 'GET', `/api/v1.0/models/${modelId}`);
+          }
+
+          if (operation === 'getMany') {
+            const returnAll = this.getNodeParameter('modelReturnAll', i) as boolean;
+            const limit = returnAll ? undefined : (this.getNodeParameter('modelLimit', i) as number);
+            const orderBy = this.getNodeParameter('modelOrderBy', i, '') as string;
+            const orderDir = this.getNodeParameter('modelOrderDirection', i, 'asc') as string;
+            // Uses OData-style $top/$skip pagination (not $p/$s)
+            const pageSize = limit ? Math.min(100, limit) : 100;
+            const results: any[] = [];
+            let skip = 0;
+            let hasMore = true;
+            while (hasMore) {
+              const take = limit ? Math.min(pageSize, limit - results.length) : pageSize;
+              const qs = new URLSearchParams({ $top: String(take), $skip: String(skip) });
+              if (orderBy) qs.set('$orderby', orderBy);
+              if (orderBy && orderDir) qs.set('$orderbyDirection', orderDir);
+              const response = await iiqApiRequest(this, 'GET', `/api/v1.0/models?${qs.toString()}`);
+              const items = response?.Items ?? response ?? [];
+              if (!Array.isArray(items) || items.length === 0) break;
+              results.push(...items);
+              if (items.length < take) hasMore = false;
+              if (limit && results.length >= limit) { responseData = results.slice(0, limit); break; }
+              skip += items.length;
+            }
+            if (!responseData) responseData = results;
+          }
+        }
+
+        // ═════════════════════════════
         //  ISSUES
         //  GET /api/v1.0/issues/site (IDs only)
         //  GET /api/v1.0/issues/types (names + IDs, paginated)
@@ -786,6 +880,30 @@ export class IncidentIq implements INodeType {
             const body = {
               SiteScope: 'Aggregate',
               ApplySiteVisibility: applySiteVis,
+            };
+            responseData = await iiqPostPaginatedRequest(this, '/api/v1.0/issues', body, limit);
+          }
+
+          if (operation === 'listByModel') {
+            // GET /api/v1.0/issues/for/models/{modelId} — issues available for an asset model
+            const modelId = this.getNodeParameter('issueModelId', i) as string;
+            const applySiteVis = this.getNodeParameter('applySiteVisibility', i, true) as boolean;
+            const qs = `?ApplySiteVisibility=${applySiteVis}`;
+            const response = await iiqApiRequest(this, 'GET', `/api/v1.0/issues/for/models/${modelId}${qs}`);
+            responseData = response?.Items ?? response ?? [];
+          }
+
+          if (operation === 'listByAsset') {
+            // POST /api/v1.0/issues with AssetIds filter — issues available for a specific asset
+            const assetId = this.getNodeParameter('issueAssetId', i) as string;
+            const returnAll = this.getNodeParameter('returnAll', i) as boolean;
+            const limit = returnAll ? undefined : (this.getNodeParameter('limit', i) as number);
+            const applySiteVis = this.getNodeParameter('applySiteVisibility', i, true) as boolean;
+            const body = {
+              SiteScope: 'Aggregate',
+              Strategy: 'Explicit',
+              ApplySiteVisibility: applySiteVis,
+              AssetIds: [assetId],
             };
             responseData = await iiqPostPaginatedRequest(this, '/api/v1.0/issues', body, limit);
           }
