@@ -559,7 +559,7 @@ export class IncidentIq implements INodeType {
       },
       {
         displayName: 'Filter (JSON)', name: 'filterJson', type: 'json', default: '{}',
-        description: 'Filter body merged into the search request. For tickets/users use Filters array format. For assets use $filter query param format.',
+        description: 'Filter body merged into the POST search request. Use the Filters array format, e.g. {"Filters":[{"Facet":"View","Id":"<guid>"}]}.',
         displayOptions: { show: { operation: ['getMany'] } },
       },
 
@@ -745,7 +745,7 @@ export class IncidentIq implements INodeType {
 
         // ═════════════════════════════
         //  ASSETS
-        //  List:   GET  /api/v1.0/assets?$p=0&$s=50
+        //  Search: POST /api/v1.0/assets?$p=0&$s=50  (GET returns 405 Method Not Allowed)
         //  Get:    GET  /api/v1.0/assets/{id}
         //  Create: POST /api/v1.0/assets/new
         // ═════════════════════════════
@@ -759,11 +759,13 @@ export class IncidentIq implements INodeType {
             const returnAll = this.getNodeParameter('returnAll', i) as boolean;
             const limit = returnAll ? undefined : (this.getNodeParameter('limit', i) as number);
             const filter = parseFilter(i);
-            const qp: Record<string, string> = {};
-            if (filter.$filter) qp.$filter = filter.$filter;
-            if (filter.$o) qp.$o = filter.$o;
-            if (filter.$d) qp.$d = filter.$d;
-            responseData = await iiqGetPaginatedRequest(this, '/api/v1.0/assets', limit, qp);
+            const body = {
+              OnlyShowDeleted: false,
+              Filters: [],
+              FilterByViewPermission: true,
+              ...filter,
+            };
+            responseData = await iiqPostPaginatedRequest(this, '/api/v1.0/assets', body, limit);
           }
 
           if (operation === 'create') {
